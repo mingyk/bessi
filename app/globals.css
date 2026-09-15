@@ -1,0 +1,362 @@
+:root {
+  --paper: #f7f6f2;
+  --ink: #2a2622;
+  --muted: #8a8278;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  color: var(--ink);
+  background-color: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 1100ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-call-active="true"] body {
+  background-color: #f1f3f0;
+}
+
+.page {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 36px 40px 48px;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mark,
+.nav-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  text-transform: lowercase;
+}
+
+.mark {
+  font-family: var(--font-serif), ui-serif, Georgia, serif;
+  font-size: 22px;
+  font-weight: 500;
+  font-variation-settings: "SOFT" 40, "WONK" 0;
+  letter-spacing: -0.02em;
+}
+
+.nav-link {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.nav-link.is-on,
+.nav-link:hover {
+  color: var(--ink);
+}
+
+.mark:focus-visible,
+.nav-link:focus-visible,
+.form-submit:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.hero {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 48px;
+  padding-bottom: 8vh;
+  isolation: isolate;
+}
+
+h1 {
+  font-family: var(--font-serif), ui-serif, Georgia, serif;
+  font-weight: 500;
+  font-size: clamp(28px, 4.2vw, 40px);
+  font-variation-settings: "SOFT" 50, "WONK" 0;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  text-transform: lowercase;
+}
+
+.talk {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.orb {
+  --voice-level: 0;
+  position: relative;
+  appearance: none;
+  border: 0;
+  padding: 0;
+  width: 196px;
+  height: 196px;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 50%;
+  filter:
+    drop-shadow(0 24px 34px rgba(39, 37, 35, 0.13))
+    drop-shadow(0 4px 8px rgba(39, 37, 35, 0.08));
+  transition:
+    transform 500ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 500ms ease,
+    opacity 300ms ease;
+}
+
+.orb:hover {
+  transform: translateY(-3px) scale(1.015);
+  filter:
+    drop-shadow(0 30px 42px rgba(39, 37, 35, 0.16))
+    drop-shadow(0 5px 10px rgba(39, 37, 35, 0.08));
+}
+
+.orb:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 8px;
+}
+
+.orb-canvas {
+  position: relative;
+  z-index: 3;
+  display: block;
+  width: 196px;
+  height: 196px;
+  transform: scale(calc(1 + var(--voice-level) * 0.075));
+  transition: transform 90ms ease-out;
+}
+
+.orb-wave,
+.orb-ring {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 50%;
+}
+
+.orb-wave {
+  z-index: -1;
+  inset: 8%;
+  background: #dbe9e6;
+  opacity: 0;
+  transform: scale(0.9);
+}
+
+.orb:not(.idle) .orb-wave {
+  animation: color-wave 1300ms cubic-bezier(0.2, 0.72, 0.25, 1) both;
+}
+
+.orb-ring {
+  z-index: 1;
+  inset: -7%;
+  border: 1px solid rgba(42, 99, 103, 0.24);
+  opacity: calc(0.08 + var(--voice-level) * 0.5);
+  transform: scale(calc(1.02 + var(--voice-level) * 0.16));
+  transition:
+    transform 90ms ease-out,
+    opacity 90ms ease-out;
+}
+
+.orb-ring-two {
+  inset: -15%;
+  border-color: rgba(72, 116, 138, 0.16);
+  opacity: calc(0.04 + var(--voice-level) * 0.32);
+  transform: scale(calc(0.98 + var(--voice-level) * 0.23));
+}
+
+.orb.connecting {
+  opacity: 0.72;
+}
+
+.orb.live,
+.orb.listening,
+.orb.speaking {
+  filter:
+    drop-shadow(0 27px 38px rgba(28, 61, 66, 0.17))
+    drop-shadow(0 0 20px rgba(111, 176, 170, 0.14));
+}
+
+.orb.live .orb-ring-one,
+.orb.listening .orb-ring-one,
+.orb.speaking .orb-ring-one {
+  animation: ring-breathe 2.8s ease-in-out infinite;
+}
+
+.orb.live .orb-ring-two,
+.orb.listening .orb-ring-two,
+.orb.speaking .orb-ring-two {
+  animation: ring-breathe 3.6s 600ms ease-in-out infinite reverse;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: lowercase;
+}
+
+.timer-track {
+  width: 196px;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: rgba(42, 38, 34, 0.1);
+}
+
+.timer-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  background: var(--ink);
+  animation-name: drain;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.contact {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 28rem;
+  width: 100%;
+  margin: 0 auto;
+  padding-bottom: 8vh;
+  gap: 28px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: lowercase;
+}
+
+.form input,
+.form textarea {
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(42, 38, 34, 0.18);
+  border-radius: 0;
+  padding: 8px 0;
+  resize: vertical;
+}
+
+.form input:focus,
+.form textarea:focus {
+  outline: none;
+  border-bottom-color: var(--ink);
+}
+
+.form-submit {
+  appearance: none;
+  align-self: flex-start;
+  margin-top: 8px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  font: inherit;
+  font-size: 14px;
+  text-transform: lowercase;
+  padding: 8px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.form-submit:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.form-note {
+  color: var(--muted);
+  font-size: 16px;
+}
+
+@keyframes color-wave {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.88);
+  }
+  55% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(12);
+  }
+}
+
+@keyframes ring-breathe {
+  0%,
+  100% {
+    margin: 0;
+  }
+  50% {
+    margin: -5%;
+    opacity: 0.1;
+  }
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: 28px 24px 40px;
+  }
+
+  .orb,
+  .orb-canvas {
+    width: 168px;
+    height: 168px;
+  }
+
+  .timer-track {
+    width: 168px;
+  }
+}

@@ -38,8 +38,18 @@ CONTACT_FROM_EMAIL=Bessi <onboarding@resend.dev>
 
 ## Deploy on Vercel
 
+This is a Next.js app. In the Vercel project:
+
+1. **Settings → General → Framework Preset** → `Next.js`
+2. **Build Command** → `next build` (default)
+3. **Output Directory** → leave **empty** (do not set `public`)
+4. Add env vars: `OPENAI_API_KEY`, `RESEND_API_KEY`, `CONTACT_TO_EMAIL`
+5. Redeploy
+
 ```bash
 npx vercel
 ```
 
-In the Vercel project, add `OPENAI_API_KEY`, `RESEND_API_KEY`, and `CONTACT_TO_EMAIL`. Redeploy after saving them.
+```bash
+npx vercel --prod
+```

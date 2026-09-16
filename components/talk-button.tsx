@@ -10,8 +10,7 @@ import {
 import { Orb } from "@/components/orb";
 import { VoiceSession, type VoiceStatus } from "@/lib/voice-session";
 
-export const IDLE_MS = 30_000;
-export const MAX_MS = 60_000;
+const MAX_MS = 60_000;
 
 export function TalkButton() {
   const session = useRef<VoiceSession | null>(null);
@@ -20,7 +19,6 @@ export function TalkButton() {
   const [error, setError] = useState("");
   const [run, setRun] = useState(0);
   const active = status !== "idle";
-  const busy = status === "listening" || status === "speaking";
 
   const hangup = useCallback(() => {
     session.current?.stop();
@@ -40,18 +38,6 @@ export function TalkButton() {
       delete document.documentElement.dataset.callActive;
     };
   }, [active]);
-
-  useEffect(() => {
-    if (!active) return;
-    const max = window.setTimeout(hangup, MAX_MS);
-    return () => window.clearTimeout(max);
-  }, [active, run, hangup]);
-
-  useEffect(() => {
-    if (!active || status === "connecting" || busy) return;
-    const idle = window.setTimeout(hangup, IDLE_MS);
-    return () => window.clearTimeout(idle);
-  }, [active, status, busy, hangup]);
 
   const toggle = useCallback(async () => {
     setError("");
@@ -92,10 +78,7 @@ export function TalkButton() {
         <Orb status={status} level={level} />
       </button>
       {active && status !== "connecting" ? (
-        <div
-          className="timer-track"
-          aria-hidden
-        >
+        <div className="timer-track" aria-hidden>
           <span
             key={run}
             className="timer-fill"

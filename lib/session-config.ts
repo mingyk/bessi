@@ -20,7 +20,12 @@ export function turnDetection(silenceMs: number) {
 
 export function buildRealtimeSession(
   instructions: string,
-  options?: { transcribe?: boolean; transcriptionPrompt?: string; silenceMs?: number },
+  options?: {
+    transcribe?: boolean;
+    transcriptionPrompt?: string;
+    silenceMs?: number;
+    tools?: readonly object[];
+  },
 ) {
   const transcription = options?.transcriptionPrompt
     ? { ...INPUT_TRANSCRIPTION, prompt: options.transcriptionPrompt }
@@ -30,6 +35,7 @@ export function buildRealtimeSession(
     model: MODEL,
     instructions,
     output_modalities: ["audio"],
+    ...(options?.tools?.length ? { tools: options.tools, tool_choice: "auto" } : {}),
     audio: {
       input: {
         ...(options?.transcribe ? { transcription } : {}),
@@ -42,4 +48,6 @@ export function buildRealtimeSession(
   };
 }
 
-export const realtimeSession = buildRealtimeSession(AGENT_INSTRUCTIONS);
+export const realtimeSession = buildRealtimeSession(AGENT_INSTRUCTIONS, {
+  transcribe: true,
+});

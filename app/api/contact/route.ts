@@ -23,6 +23,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const first = read(body?.first, 80);
   const last = read(body?.last, 80);
+  const restaurant = read(body?.restaurant, 160);
   const email = read(body?.email, 200);
   const phone = read(body?.phone, 40);
   const need = read(body?.need, 4000);
@@ -42,9 +43,10 @@ export async function POST(request: Request) {
       from,
       to: [to],
       reply_to: email,
-      subject: `bessi contact — ${first} ${last}`,
+      subject: `bessi contact — ${first} ${last}${restaurant ? `, ${restaurant}` : ""}`,
       text: [
         `${first} ${last}`,
+        ...(restaurant ? [restaurant] : []),
         email,
         phone,
         "",

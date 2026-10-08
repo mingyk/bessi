@@ -14,9 +14,9 @@ const serif = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "Bessi",
+  title: "Bessi — the front desk for your restaurant’s phone",
   description:
-    "An AI front-desk employee that answers your phone 24/7 and handles routine customer conversations for your business.",
+    "Bessi answers your restaurant’s phone around the clock: reservations, the wait list, to-go orders, and questions about your menu and hours.",
 };
 
 export default function RootLayout({

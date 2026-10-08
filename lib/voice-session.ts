@@ -1,14 +1,4 @@
 import {
-  applyHost,
-  applyUpdate,
-  bookingInstructions,
-  emptySheet,
-  nextNeededAsk,
-  type BookingSheet,
-  type BookingUpdate,
-  type HostBooking,
-} from "./booking-sheet";
-import {
   INPUT_TRANSCRIPTION,
   DEMO_TURN_SILENCE_MS,
   NAME_TURN_SILENCE_MS,
@@ -74,6 +64,7 @@ export class VoiceSession {
   private lastInputItemId = "";
   private lastHostItemId = "";
   private fillerResponseId = "";
+  private fillerHeard = "";
   private recentFillers: string[] = [];
   private serverVadOff = false;
   private localSpeechSince = 0;
@@ -110,17 +101,15 @@ export class VoiceSession {
   private decidePath = "";
   private decideAbort: AbortController | null = null;
   private expectAbort: AbortController | null = null;
-  private hostBookAbort: AbortController | null = null;
-  private hostLine = 0;
-  private acceptedOnHostLine = -1;
+  private toolPath = "";
+  private desk: unknown = null;
+  private toolBusy = false;
   private turnId = 0;
   private expectId = 0;
   private nameHold = false;
   private steerApplied = false;
   private suppressReply = false;
-  private detailChecks = 0;
   private hearChecks = 0;
-  private sheet: BookingSheet = emptySheet();
   private queuedSteer = "";
   private history: DialogueLine[] = [];
   private pendingTranscript = "";
@@ -133,13 +122,14 @@ export class VoiceSession {
   constructor(
     onStatus: StatusFn,
     onLevel: (level: number) => void,
-    options?: { sessionPath?: string; maxMs?: number; decidePath?: string },
+    options?: { sessionPath?: string; maxMs?: number; decidePath?: string; toolPath?: string },
   ) {
     this.onStatus = onStatus;
     this.onLevel = onLevel;
     this.sessionPath = options?.sessionPath ?? "/api/session";
     this.maxMs = options?.maxMs ?? 60_000;
     this.decidePath = options?.decidePath ?? "";
+    this.toolPath = options?.toolPath ?? "";
   }
 
   async start() {
@@ -172,6 +162,7 @@ export class VoiceSession {
       this.opening = tokenData.greeting.trim();
       this.openingExact = true;
     }
+    if (tokenData.desk && typeof tokenData.desk === "object") this.desk = tokenData.desk;
     if (!tokenRes.ok || typeof tokenData.value !== "string") {
       localStream.getTracks().forEach((track) => track.stop());
       throw new Error(tokenData.error || "Could not start a voice session");
@@ -238,6 +229,13 @@ export class VoiceSession {
       sdp: await sdpResponse.text(),
     });
     this.startRoomTone();
+    if (this.decidePath) {
+      void fetch(this.decidePath, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ latest: "" }),
+      }).catch(() => {});
+    }
   }
 
   private startRoomTone() {
@@ -253,7 +251,6 @@ export class VoiceSession {
   stop() {
     this.decideAbort?.abort();
     this.expectAbort?.abort();
-    this.hostBookAbort?.abort();
     window.clearTimeout(this.greetingTimer);
     window.clearTimeout(this.bargeTimer);
     window.clearTimeout(this.bargeCheck);
@@ -363,6 +360,7 @@ export class VoiceSession {
   private hostBusy() {
     return (
       this.greetLocked ||
+      this.toolBusy ||
       ((this.speaking || this.responseOpen) && !this.filling) ||
       (this.wantsReply && !this.replySent)
     );
@@ -370,26 +368,24 @@ export class VoiceSession {
 
   private scheduleFill() {
     window.clearTimeout(this.fillTimer);
-    if (!this.decidePath || this.closing || this.greetLocked) return;
+    if (!this.decidePath || this.closing || this.greetLocked || this.toolBusy) return;
     if (this.speaking || this.responseOpen) return;
     if (this.speechEndAt - this.speechStartedAt < FILL_MIN_SPEECH_MS) return;
     this.fillTimer = window.setTimeout(() => this.fill(), FILL_AFTER_MS);
   }
 
   private fill() {
-    if (this.closing || this.greetLocked || this.guestTalking) return;
+    if (this.closing || this.greetLocked || this.guestTalking || this.toolBusy) return;
     if (this.speaking || this.responseOpen) return;
     const turnForThisSpeech = this.turnWaitStart >= this.speechEndAt;
     if (turnForThisSpeech && (this.decisionReady || this.replySent)) return;
     if (!this.lastInputItemId) return;
     this.filling = true;
     this.filledTurn = true;
+    this.fillerHeard = "";
     this.responseOpen = true;
     this.awaitingReply = true;
-    const input = [
-      ...(this.lastHostItemId ? [{ type: "item_reference", id: this.lastHostItemId }] : []),
-      { type: "item_reference", id: this.lastInputItemId },
-    ];
+    const input = [{ type: "item_reference", id: this.lastInputItemId }];
     const recent = this.recentFillers.length
       ? ` You recently said ${this.recentFillers.map((line) => `"${line}"`).join(", ")}; say something different from those.`
       : "";
@@ -401,6 +397,7 @@ export class VoiceSession {
         instructions:
           `You are a restaurant host in the middle of a phone call that is already underway. The caller just spoke and you will answer in a moment. Say only a tiny phone murmur, the way a person actually sounds before they answer — not a sentence, not a translation of an English filler. If the call is in Korean, say only 네, 네네, 아 네, or 음. Never 알겠습니다, 그렇군요, 잠깐만요, 좋아요, 알겠어요, or 잠시만요. If the call is in English, say only okay, mm-hmm, yeah, or gotcha. In any other language, use that same kind of native murmur, not a translated "got it" or "one moment". Use the same language as the caller if they just spoke a full sentence; otherwise stay with the language you have been using.${recent} Never greet, never thank them for calling, never say goodbye, never answer, never ask a question, never mention a name, time, price, or detail, and never say you are checking or looking anything up.`,
         metadata: { kind: "filler" },
+        tool_choice: "none",
       },
     });
     this.log("filler", { turn: this.turnId });
@@ -483,110 +480,36 @@ export class VoiceSession {
     const history = this.history
       .filter((line) => line.text.trim() !== latest)
       .slice(-6);
-    const timer = window.setTimeout(() => controller.abort(), 900);
+    const timer = window.setTimeout(() => controller.abort(), 1200);
     void fetch(this.decidePath, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ latest, history, sheet: this.sheet }),
+      body: JSON.stringify({ latest, history }),
       signal: controller.signal,
     })
       .then((response) => (response.ok ? response.json() : null))
-      .then((decision: (TurnDecision & { booking?: BookingUpdate | null }) | null) => {
+      .then((decision: TurnDecision | null) => {
         window.clearTimeout(timer);
         if (turn !== this.turnId) return;
+        this.decisionReady = true;
         if (!decision) {
-          this.decisionReady = true;
           this.flushReply();
           return;
         }
-        this.decisionReady = true;
-        const askedName = this.nameHold;
-        if (decision.steer === "ignore" && !askedName) {
+        if (decision.steer === "ignore" && !this.nameHold) {
           this.ignoreTurn();
           return;
         }
-        const waitingTime = this.sheet.time.pending;
-        const waitingOffer = this.sheet.offer;
-        let update = decision.booking ?? null;
-        const spokenName = latest.replace(/[\s.,!?;:]+$/u, "").trim();
-        if (
-          (!update || update.intent === "none") &&
-          askedName &&
-          decision.naming &&
-          /\p{L}{2,}/u.test(spokenName) &&
-          spokenName.split(/\s+/).length <= 3
-        ) {
-          update = {
-            intent: "propose",
-            time: null,
-            party: null,
-            date: null,
-            name: spokenName,
-          };
-        }
-        const sameClock = (a: string | null, b: string | null) =>
-          Boolean(a && b) &&
-          a!.replace(/[^0-9:]/g, "") === b!.replace(/[^0-9:]/g, "") &&
-          a!.replace(/[^0-9:]/g, "") !== "";
-        if (
-          update?.intent === "propose" &&
-          update.time &&
-          (sameClock(update.time, this.sheet.time.pending) ||
-            sameClock(update.time, this.sheet.offer))
-        ) {
-          update = { ...update, intent: "accept", time: null };
-        }
-        if (update && update.intent !== "none") {
-          if (update.intent === "accept") this.acceptedOnHostLine = this.hostLine;
-          this.sheet = applyUpdate(this.sheet, update);
-          this.log("sheet", {
-            turn: this.turnId,
-            intent: update.intent,
-            pending: this.sheet.time.pending,
-            held: this.sheet.time.held,
-            booked: this.sheet.time.booked,
-            offer: this.sheet.offer,
-            name: this.sheet.name.pending || this.sheet.name.accepted,
-          });
-        }
-        const acted =
-          update != null &&
-          (update.intent === "propose" ||
-            update.intent === "reject" ||
-            (update.intent === "accept" && (waitingTime != null || waitingOffer != null)));
-        const booked = bookingInstructions(
-          this.sheet,
-          acted ? update : null,
-          decision.recall === true,
-        );
-        let instructions = booked;
-        if (acted || (decision.steer !== "noise" && decision.steer !== "ignore")) {
+        let instructions = "";
+        if (decision.steer === "noise") {
+          instructions = steerInstructions(decision, { repeats: this.hearChecks });
+          this.hearChecks += 1;
+        } else {
           this.hearChecks = 0;
-        }
-        if (!instructions) {
-          if (
-            (decision.steer === "slip" || decision.steer === "third_value") &&
-            this.detailChecks >= 1
-          ) {
-            instructions = "";
-          } else if (decision.steer === "noise") {
-            instructions = steerInstructions(decision, {
-              repeats: this.hearChecks,
-              need: nextNeededAsk(this.sheet, this.history),
-            });
-            this.hearChecks += 1;
-          } else {
-            instructions = steerInstructions(decision);
-            if (decision.steer === "slip" || decision.steer === "third_value") {
-              if (instructions) this.detailChecks += 1;
-            }
-          }
+          instructions = steerInstructions(decision);
         }
         if (!instructions && decision.checkin && decision.steer === "none") {
-          instructions = steerInstructions(
-            { ...decision, steer: "resume" },
-            { need: nextNeededAsk(this.sheet, this.history) },
-          );
+          instructions = steerInstructions({ ...decision, steer: "resume" });
         }
         if (instructions) this.queuedSteer = instructions;
         this.log("decide", {
@@ -712,50 +635,40 @@ export class VoiceSession {
       .catch(() => window.clearTimeout(timer));
   }
 
-  private kickHostBooking(text: string) {
-    const latest = text.trim();
-    if (!this.decidePath || latest.length < 2) return;
-    this.hostBookAbort?.abort();
-    const controller = new AbortController();
-    this.hostBookAbort = controller;
-    const id = ++this.hostLine;
-    const timer = window.setTimeout(() => controller.abort(), 1500);
-    void fetch(this.decidePath, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ latest, history: [], ask: "host_booking", sheet: this.sheet }),
-      signal: controller.signal,
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: HostBooking | null) => {
-        window.clearTimeout(timer);
-        if (!data || id !== this.hostLine) return;
-        if (typeof data.offer !== "string" && data.offer !== null) return;
-        if (typeof data.booked !== "string" && data.booked !== null) return;
-        const guestAlreadyAccepted = this.acceptedOnHostLine === id;
-        this.sheet = applyHost(this.sheet, {
-          offer: data.offer,
-          booked: data.booked,
+  private async runTools(calls: { call_id: string; name: string; arguments: string }[]) {
+    const turn = this.turnId;
+    this.toolBusy = true;
+    for (const call of calls) {
+      let output: unknown = { result: "desk_unavailable" };
+      try {
+        const response = await fetch(this.toolPath, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: call.name, arguments: call.arguments, state: this.desk }),
         });
-        this.log("host_sheet", {
-          offer: data.offer,
-          booked: data.booked,
-          pending: this.sheet.time.pending,
-          held: this.sheet.time.held,
-          bookedTime: this.sheet.time.booked,
-          waitingOffer: this.sheet.offer,
-        });
-        if (guestAlreadyAccepted && this.sheet.offer && !this.sheet.time.booked) {
-          this.sheet = applyUpdate(this.sheet, {
-            intent: "accept",
-            time: null,
-            party: null,
-            date: null,
-            name: null,
-          });
+        if (response.ok) {
+          const data = (await response.json()) as { output?: unknown; state?: unknown };
+          output = data.output ?? output;
+          if (data.state && typeof data.state === "object") this.desk = data.state;
         }
-      })
-      .catch(() => window.clearTimeout(timer));
+      } catch {
+        // the model still gets an answer so it never waits on a dead call
+      }
+      this.log("tool", { turn, name: call.name, args: call.arguments, output });
+      this.send({
+        type: "conversation.item.create",
+        item: { type: "function_call_output", call_id: call.call_id, output: JSON.stringify(output) },
+      });
+    }
+    this.toolBusy = false;
+    if (this.closing) return;
+    if (turn !== this.turnId || this.guestTalking) {
+      this.afterHost();
+      return;
+    }
+    this.responseOpen = true;
+    this.awaitingReply = true;
+    this.send({ type: "response.create" });
   }
 
   private ignoreTurn() {
@@ -774,12 +687,7 @@ export class VoiceSession {
     if (this.closing || this.greetLocked || this.guestTalking) return;
     if (this.speaking || this.responseOpen) return;
     if (this.replyTries >= 2) return;
-    if (!this.queuedSteer) {
-      this.queuedSteer = steerInstructions(
-        { steer: "resume" },
-        { need: nextNeededAsk(this.sheet, this.history) },
-      );
-    }
+    if (!this.queuedSteer) this.queuedSteer = steerInstructions({ steer: "resume" });
     this.log("reply_resume", { turn: this.turnId, reason, tries: this.replyTries });
     this.replySent = false;
     this.wantsReply = true;
@@ -874,8 +782,9 @@ export class VoiceSession {
   }
 
   private afterHost() {
-    if (this.speaking || this.responseOpen) return;
+    if (this.speaking || this.responseOpen || this.toolBusy) return;
     this.filling = false;
+    this.fillerHeard = "";
     this.setServerVad(true);
     if (this.greetLocked && this.greetingSent) {
       this.releaseGreeting();
@@ -918,7 +827,14 @@ export class VoiceSession {
       id?: string;
       status?: string;
       status_details?: { error?: { type?: string; code?: string; message?: string } };
-      output?: { id?: string; type?: string; role?: string }[];
+      output?: {
+        id?: string;
+        type?: string;
+        role?: string;
+        call_id?: string;
+        name?: string;
+        arguments?: string;
+      }[];
       metadata?: { kind?: string } | null;
     };
     response_id?: string;
@@ -1002,6 +918,15 @@ export class VoiceSession {
           this.resumeReply(status);
           break;
         }
+        const calls = (event.response?.output ?? []).flatMap((item) =>
+          item.type === "function_call" && item.call_id && item.name
+            ? [{ call_id: item.call_id, name: item.name, arguments: item.arguments ?? "{}" }]
+            : [],
+        );
+        if (calls.length && !this.filling && this.toolPath && status === "completed") {
+          void this.runTools(calls);
+          break;
+        }
         this.afterHost();
         break;
       }
@@ -1033,6 +958,16 @@ export class VoiceSession {
         this.beginTurn(heard);
         break;
       }
+      case "response.output_audio_transcript.delta":
+      case "response.audio_transcript.delta":
+        if (!this.filling || typeof event.delta !== "string") break;
+        this.fillerHeard += event.delta;
+        if (this.fillerHeard.trim().split(/\s+/).filter(Boolean).length >= 3) {
+          this.send({ type: "response.cancel" });
+          this.send({ type: "output_audio_buffer.clear" });
+          this.log("filler_cut", { turn: this.turnId, text: this.fillerHeard.trim() });
+        }
+        break;
       case "response.output_audio_transcript.done":
       case "response.audio_transcript.done":
         if (typeof event.transcript === "string") {
@@ -1042,7 +977,9 @@ export class VoiceSession {
           if (fromFiller) {
             const line = event.transcript.trim();
             this.log("filler_line", { turn: this.turnId, text: line });
-            if (line) this.recentFillers = [...this.recentFillers.slice(-2), line];
+            if (line && line.split(/\s+/).filter(Boolean).length < 3) {
+              this.recentFillers = [...this.recentFillers.slice(-2), line];
+            }
             break;
           }
           this.note("host", event.transcript);
@@ -1051,7 +988,6 @@ export class VoiceSession {
             event.transcript.trim() !== this.opening
           ) {
             this.kickExpectName(event.transcript);
-            this.kickHostBooking(event.transcript);
           }
         }
         break;

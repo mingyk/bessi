@@ -5,6 +5,7 @@ import { useState, type FormEvent } from "react";
 const empty = {
   first: "",
   last: "",
+  restaurant: "",
   email: "",
   phone: "",
   need: "",
@@ -33,18 +34,25 @@ export function ContactForm() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data.error || "couldn’t send");
+        throw new Error(data.error || "couldn’t send. try again.");
       }
       setStatus("sent");
       setForm(empty);
     } catch (err) {
       setStatus("error");
-      setError(err instanceof Error ? err.message : "couldn’t send");
+      setError(err instanceof Error ? err.message : "couldn’t send. try again.");
     }
   };
 
   if (status === "sent") {
-    return <p className="form-note">got it. we’ll be in touch.</p>;
+    return (
+      <div className="form-sent" role="status">
+        <p>thanks. we’ll be in touch soon.</p>
+        <button type="button" className="text-button" onClick={() => setStatus("idle")}>
+          send another
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -72,41 +80,58 @@ export function ContactForm() {
         </label>
       </div>
       <label>
-        email
+        restaurant
         <input
-          name="email"
-          type="email"
-          autoComplete="email"
+          name="restaurant"
+          autoComplete="organization"
           required
-          value={form.email}
-          onChange={update("email")}
+          value={form.restaurant}
+          onChange={update("restaurant")}
         />
       </label>
+      <div className="form-row">
+        <label>
+          email
+          <input
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            value={form.email}
+            onChange={update("email")}
+          />
+        </label>
+        <label>
+          phone
+          <input
+            name="phone"
+            type="tel"
+            autoComplete="tel"
+            required
+            value={form.phone}
+            onChange={update("phone")}
+          />
+        </label>
+      </div>
       <label>
-        phone
-        <input
-          name="phone"
-          type="tel"
-          autoComplete="tel"
-          required
-          value={form.phone}
-          onChange={update("phone")}
-        />
-      </label>
-      <label>
-        what do you need?
+        which calls should she take?
         <textarea
           name="need"
           required
-          rows={4}
+          rows={3}
+          placeholder="reservations, the wait list, to-go, after hours…"
           value={form.need}
           onChange={update("need")}
         />
       </label>
-      <button type="submit" className="form-submit" disabled={status === "sending"}>
-        {status === "sending" ? "sending" : "send"}
-      </button>
-      {error ? <p className="hint">{error}</p> : null}
+      <div className="form-foot">
+        <button type="submit" className="button" disabled={status === "sending"}>
+          {status === "sending" ? "sending…" : "send"}
+        </button>
+        <p className="form-error" aria-live="polite">
+          {error}
+        </p>
+      </div>
     </form>
   );
 }

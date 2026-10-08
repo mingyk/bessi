@@ -1,4 +1,3 @@
-import type { BookingSheet } from "./booking-sheet";
 import type { DialogueLine, TurnDecision } from "./turn-decision";
 
 const ON_TOPIC =
@@ -23,23 +22,7 @@ export function isOffTopic(transcript: string): boolean {
   return OFF_TOPIC.test(text);
 }
 
-function sheetOpen(sheet: BookingSheet) {
-  return Boolean(
-    sheet.date.accepted ||
-      sheet.date.pending ||
-      sheet.party.accepted ||
-      sheet.party.pending ||
-      sheet.time.pending ||
-      sheet.time.held ||
-      sheet.time.booked ||
-      sheet.offer ||
-      sheet.name.accepted ||
-      sheet.name.pending,
-  );
-}
-
-function midRestaurantTask(history: DialogueLine[], sheet: BookingSheet) {
-  if (sheetOpen(sheet)) return true;
+function midRestaurantTask(history: DialogueLine[]) {
   const host = [...history].reverse().find((line) => line.speaker === "host");
   if (host && HOST_ASKS.test(host.text)) return true;
   return history.some((line) => TASK.test(line.text));
@@ -49,10 +32,9 @@ export function guardRestaurantSteer(
   decision: TurnDecision,
   latest: string,
   history: DialogueLine[],
-  sheet: BookingSheet,
 ): TurnDecision {
   if (decision.steer !== "out_of_scope") return decision;
   if (CLEAR_OFF_TOPIC.test(latest)) return decision;
-  if (!midRestaurantTask(history, sheet)) return decision;
+  if (!midRestaurantTask(history)) return decision;
   return { ...decision, steer: "noise" };
 }

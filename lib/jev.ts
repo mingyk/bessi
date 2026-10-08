@@ -27,22 +27,6 @@ const QUESTIONS = {
         "A clear request that is not about this restaurant, such as weather, trivia, or math that is not a bill or a headcount. Do not use this when they seem to be answering the host about a reservation, wait, or order, even if a word looks like another topic (a misheard time or name).",
     },
   },
-  move: {
-    type: "choice",
-    instructions:
-      "How does the guest's latest line relate to reservation details already in the conversation?",
-    criteria: {
-      none: "Not about a reservation detail, or it repeats the same detail.",
-      provide:
-        "Adds a name, party size, time, or date that was not settled yet, with no conflict.",
-      clear_correction:
-        "They give a different time, date, or party size on purpose, including a second or third change. The newest value replaces the old one. A name in a different language from the rest of the call is not a correction conflict.",
-      slip:
-        "The first time a time, date, or party size quietly disagrees with one already agreed, and the host has not already asked which one they mean. Not a name. Not a later change after one was already resolved.",
-      third_value:
-        "The host's last line asked them to choose between two values, and this reply names a different one. If they are changing the time again after that, this is a clear correction, not a third value.",
-    },
-  },
   name: {
     type: "noul",
     instructions:
@@ -57,17 +41,8 @@ const QUESTIONS = {
     instructions:
       "Is the guest only checking that the host is still on the line, with no new request and no yes or no to the last question?",
     criteria: {
-      true: "They are checking the host is still there: a bare hello, are you there, can you hear me, or the same idea after a pause. Not a greeting that starts the call, not thanks, not okay, not goodbye, and not an answer.",
-      false: "They are greeting at the start, answering, asking something, thanking, or ending.",
-    },
-  },
-  recall: {
-    type: "noul",
-    instructions:
-      "Is the guest asking to hear the reservation that is already booked?",
-    criteria: {
-      true: "They want the booked time, name, party size, or date repeated.",
-      false: "They are giving a detail, changing one, or talking about something else. A name by itself is not a request to hear the reservation.",
+      true: "They are checking the host is still there: a bare hello, are you there, can you hear me, or the same idea after a pause. Not a greeting that starts the call, not thanks, not okay, not goodbye, not hesitation (um, uh), and not an answer.",
+      false: "They are greeting at the start, answering, asking something, hesitating, thanking, or ending.",
     },
   },
 } as const;
@@ -103,16 +78,14 @@ function contentWords(latest: string) {
 export function toDecision(
   answers: {
     turn?: ChoiceAnswer;
-    move?: ChoiceAnswer;
     name?: NoulAnswer;
-    recall?: NoulAnswer;
     checkin?: NoulAnswer;
   },
   latest = "",
 ): TurnDecision {
   const naming = (answers.name?.noul ?? 0) >= 0.55;
-  const recall = (answers.recall?.noul ?? 0) >= 0.55;
-  const checkin = !naming && (answers.checkin?.noul ?? 0) >= 0.55;
+  const hesitation = /^(um+|uh+|hmm+|어+|음+)[.?!\s]*$/i.test(latest);
+  const checkin = !naming && !hesitation && (answers.checkin?.noul ?? 0) >= 0.55;
   const turn = chosen(answers.turn, 0.55);
   const noiseSure = chosen(answers.turn, 0.85) === "noise";
   const restaurantP = answers.turn?.probabilities?.restaurant ?? 0;
@@ -125,12 +98,8 @@ export function toDecision(
     chosen(answers.turn, 0.62) === "out_of_scope"
   ) {
     steer = "out_of_scope";
-  } else if (!naming && (turn === "restaurant" || turn == null)) {
-    const move = chosen(answers.move, 0.55);
-    if (move === "third_value") steer = "third_value";
-    else if (move === "slip") steer = "slip";
   }
-  return { steer, naming, recall, checkin };
+  return { steer, naming, checkin };
 }
 
 export async function decideTurn(input: {
@@ -140,7 +109,6 @@ export async function decideTurn(input: {
   const none: TurnDecision = {
     steer: "none",
     naming: false,
-    recall: false,
     checkin: false,
   };
   const latest = input.latest.trim();
@@ -171,9 +139,7 @@ export async function decideTurn(input: {
   if (!response.ok) return none;
   const data = (await response.json()) as { answers?: {
     turn?: ChoiceAnswer;
-    move?: ChoiceAnswer;
     name?: NoulAnswer;
-    recall?: NoulAnswer;
     checkin?: NoulAnswer;
   } };
   if (!data.answers) return none;

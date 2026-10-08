@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { MODEL, VOICE } from "../lib/constants";
 import { buildGalbiCall } from "../lib/galbi";
+import { loadDoc } from "../lib/galbi-doc";
+import { runDeskTool } from "../lib/host-desk";
 import { getOpenAIKey } from "../lib/openai-key";
 import { loadRoomLoop, mixRoom, ROOM_FRAME } from "../lib/room-mix";
 
@@ -112,7 +114,9 @@ async function attachOpenAI(twilio: WebSocket) {
     twilio.close();
     return;
   }
-  const { instructions, greeting } = buildGalbiCall();
+  const { instructions, greeting, tools, desk: firstDesk } = buildGalbiCall();
+  const doc = loadDoc();
+  let desk = firstDesk;
   const openai = new WebSocket(
     `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(MODEL)}`,
     { headers: { Authorization: `Bearer ${apiKey}` } },
@@ -181,6 +185,8 @@ async function attachOpenAI(twilio: WebSocket) {
         model: MODEL,
         instructions,
         output_modalities: ["audio"],
+        tools,
+        tool_choice: "auto",
         audio: {
           input: {
             format: { type: "audio/pcmu" },
@@ -244,6 +250,10 @@ async function attachOpenAI(twilio: WebSocket) {
       type?: string;
       delta?: string;
       item_id?: string;
+      response?: {
+        status?: string;
+        output?: { type?: string; call_id?: string; name?: string; arguments?: string }[];
+      };
     };
     if (event.type === "session.updated") greet();
     if (event.type === "input_audio_buffer.speech_started") barge();
@@ -258,6 +268,25 @@ async function attachOpenAI(twilio: WebSocket) {
       }
       const speech = Buffer.from(event.delta, "base64");
       sendAudio(speech, speech.length);
+    }
+    if (event.type === "response.done" && event.response?.status === "completed") {
+      const calls = (event.response.output ?? []).filter(
+        (item) => item.type === "function_call" && item.call_id && item.name,
+      );
+      for (const call of calls) {
+        const result = runDeskTool(doc, desk, call.name!, call.arguments ?? "{}");
+        desk = result.state;
+        console.log("[call] tool", JSON.stringify({ name: call.name, args: call.arguments, output: result.output }));
+        sendOpenAI({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: call.call_id,
+            output: JSON.stringify(result.output),
+          },
+        });
+      }
+      if (calls.length) sendOpenAI({ type: "response.create" });
     }
     if (event.type === "error") console.error("[call] openai_error", event);
   });

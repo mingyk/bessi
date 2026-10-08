@@ -5,7 +5,7 @@
   "phone": "122-555-1234",
   "parking": "Parking is free.",
   "preorder": "Pre-order is not possible.",
-  "togo": "To-go orders are taken on this call. Collect a name and the items first. Then give the price and a pickup time. Pickup is 15 minutes from now only while we are open. If we are closed, pickup is the next opening time. Never give a pickup while we are closed.",
+    "togo": "To-go orders are taken on this call. Collect a name and the items first. Then give the price and a pickup time. Pickup is 15 minutes from now only while we are open. If we are closed, pickup is the next opening time. Never give a pickup while we are closed.",
   "timezone": "America/Los_Angeles",
   "greeting": "Thanks for calling Galbi Steakhouse. How can I help?",
   "off_topic_line": "Sorry, I can't help with that. I'm happy to help with anything about Galbi Steakhouse, though.",

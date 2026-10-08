@@ -58,5 +58,6 @@ export async function POST() {
     value,
     greeting: session.greeting,
     transcription: session.session.audio.input.transcription,
+    desk: session.desk,
   });
 }

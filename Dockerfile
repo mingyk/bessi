@@ -8,6 +8,7 @@ COPY tsconfig.json ./
 COPY lib ./lib
 COPY scripts ./scripts
 COPY galbi_steakhouse.json ./
+COPY assets ./assets
 
 ENV NODE_ENV=production
 EXPOSE 8080

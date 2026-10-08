@@ -10,9 +10,15 @@ import {
 import { Orb } from "@/components/orb";
 import { VoiceSession, type VoiceStatus } from "@/lib/voice-session";
 
-const MAX_MS = 60_000;
-
-export function TalkButton() {
+export function TalkButton({
+  sessionPath = "/api/session",
+  maxMs = 60_000,
+  decidePath,
+}: {
+  sessionPath?: string;
+  maxMs?: number;
+  decidePath?: string;
+} = {}) {
   const session = useRef<VoiceSession | null>(null);
   const [status, setStatus] = useState<VoiceStatus>("idle");
   const [level, setLevel] = useState(0);
@@ -46,7 +52,11 @@ export function TalkButton() {
       return;
     }
 
-    const next = new VoiceSession(setStatus, setLevel);
+    const next = new VoiceSession(setStatus, setLevel, {
+      sessionPath,
+      maxMs,
+      decidePath,
+    });
     session.current = next;
     setRun((value) => value + 1);
     try {
@@ -60,7 +70,7 @@ export function TalkButton() {
           : "try again",
       );
     }
-  }, [active, hangup]);
+  }, [active, decidePath, hangup, maxMs, sessionPath]);
 
   return (
     <div className="talk">
@@ -82,7 +92,7 @@ export function TalkButton() {
           <span
             key={run}
             className="timer-fill"
-            style={{ animationDuration: `${MAX_MS}ms` }}
+            style={{ animationDuration: `${maxMs}ms` }}
           />
         </div>
       ) : null}

@@ -4,6 +4,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   outputFileTracingRoot: path.join(__dirname),
+  outputFileTracingIncludes: {
+    "/api/session/demo": ["./galbi_steakhouse.json"],
+  },
 };
 
 export default nextConfig;

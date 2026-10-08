@@ -501,7 +501,7 @@ export class VoiceSession {
         }
         this.decisionReady = true;
         const askedName = this.nameHold;
-        if (decision.steer === "ignore" && !askedName && !decision.checkin) {
+        if (decision.steer === "ignore" && !askedName) {
           this.ignoreTurn();
           return;
         }
@@ -582,7 +582,7 @@ export class VoiceSession {
             }
           }
         }
-        if (!instructions && decision.checkin) {
+        if (!instructions && decision.checkin && decision.steer === "none") {
           instructions = steerInstructions(
             { ...decision, steer: "resume" },
             { need: nextNeededAsk(this.sheet, this.history) },

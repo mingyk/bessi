@@ -232,7 +232,7 @@ export async function extractHostBooking(input: {
       "host_booking",
       HOST_SCHEMA,
       `Read the latest host line against the booking sheet.
-offer and booked are clocks the host spoke about a table reservation. A to-go pickup time, an order, a form, a menu item, or a party size is never either field.
+offer and booked are clocks the host spoke about a table reservation. A to-go pickup time, an opening or closing time, the hours, a deal's hours, an order, a form, a menu item, or a party size is never either field.
 offer is a new clock the host suggests. booked is a clock the host actually gives as the reservation.
 Repeating the pending time while waiting for a yes is neither. A time the host says is unavailable is never booked.
 Leave a field null when the line has no clock.`,

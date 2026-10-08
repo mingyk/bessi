@@ -360,9 +360,13 @@ ${renderMenu(doc)}
 
 ${renderDeals(doc, timeZone)}
 
-${renderPlace(doc)}Wait for this call, fixed, do not change it and do not say you looked it up: ${wait.minutesWait} minutes, ${wait.parties} ${wait.parties === 1 ? "party" : "parties"} ahead.
+${renderPlace(doc)}${
+    shopOpen
+      ? `Wait for this call, fixed, do not change it and do not say you looked it up: ${wait.minutesWait} minutes, ${wait.parties} ${wait.parties === 1 ? "party" : "parties"} ahead.
 If they ask how long the wait is, including for a party of a certain size, say those two numbers. The party size they mention does not change the wait. Say how many minutes, and how many parties are ahead.
-You can put them on the wait list on this call. Take a name and the party size, then say they're on it and how many parties are ahead.
+You can put them on the wait list on this call. Take a name and the party size, then say they're on it and how many parties are ahead.`
+      : `There is no wait and no wait list right now, because the shop is closed. If they ask about the wait or the wait list, say you're closed and when you next open, and offer to book a table instead. Never give a wait time or a number of parties ahead while closed.`
+  }
 On a to-go order, take it on this call. Do not send them to a website or a phone menu. A to-go order is not a reservation and has no reservation time. Collect a name and the items first. When you have both, confirm with the total from the menu and a pickup time. Pickup must be inside hours. If they have not named a pickup time, pickup is ${status.pickup}${pickupLine} If they name a pickup time, use it only when it is at least 15 minutes from now and inside hours. Sooner than that, or a time while the shop is closed, is not possible; say so and keep ${status.pickup}. Do not ask for a price while collecting, and do not say you need those details to give a total.
 
 Reservations:

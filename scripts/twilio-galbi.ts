@@ -6,7 +6,9 @@ import { WebSocket, WebSocketServer } from "ws";
 import { MODEL, VOICE } from "../lib/constants";
 import { buildGalbiCall } from "../lib/galbi";
 import { getOpenAIKey } from "../lib/openai-key";
-import { loadRoomLoop, mixRoomFrame, ROOM_FRAME } from "../lib/room-mix";
+import { loadRoomLoop, mixRoom, ROOM_FRAME } from "../lib/room-mix";
+
+const ROOM_LEAD_MS = 80;
 
 loadEnv();
 
@@ -122,27 +124,32 @@ async function attachOpenAI(twilio: WebSocket) {
   let lastAssistant = "";
   let greeted = false;
   const room = loadRoomLoop();
-  const hostChunks: Buffer[] = [];
   let roomAt = 0;
   let pump: ReturnType<typeof setInterval> | 0 = 0;
+  let playStart = 0;
+  let sentMs = 0;
 
-  const takeHost = () => {
-    const frame = Buffer.alloc(ROOM_FRAME, 0x7f);
-    let filled = 0;
-    while (filled < ROOM_FRAME && hostChunks.length) {
-      const chunk = hostChunks[0];
-      const need = ROOM_FRAME - filled;
-      if (chunk.length <= need) {
-        chunk.copy(frame, filled);
-        filled += chunk.length;
-        hostChunks.shift();
-      } else {
-        chunk.copy(frame, filled, 0, need);
-        hostChunks[0] = chunk.subarray(need);
-        filled = ROOM_FRAME;
-      }
+  const aheadMs = () => sentMs - (Date.now() - playStart);
+
+  const sendAudio = (host: Buffer | null, length: number) => {
+    if (!streamSid) return;
+    if (!playStart || aheadMs() < 0) {
+      playStart = Date.now();
+      sentMs = 0;
     }
-    return frame;
+    const mixed = mixRoom(host, length, room, roomAt);
+    roomAt = mixed.next;
+    sentMs += length / 8;
+    sendTwilio({
+      event: "media",
+      streamSid,
+      media: { payload: mixed.audio.toString("base64") },
+    });
+  };
+
+  const resetPlayback = () => {
+    playStart = 0;
+    sentMs = 0;
   };
 
   const stopPump = () => {
@@ -153,14 +160,9 @@ async function attachOpenAI(twilio: WebSocket) {
   const startPump = () => {
     if (pump || !streamSid) return;
     pump = setInterval(() => {
-      if (!streamSid) return;
-      const mixed = mixRoomFrame(takeHost(), room, roomAt);
-      roomAt = mixed.next;
-      sendTwilio({
-        event: "media",
-        streamSid,
-        media: { payload: mixed.frame.toString("base64") },
-      });
+      while (streamSid && (!playStart || aheadMs() < ROOM_LEAD_MS)) {
+        sendAudio(null, ROOM_FRAME);
+      }
     }, 20);
   };
 
@@ -231,7 +233,7 @@ async function attachOpenAI(twilio: WebSocket) {
       });
     }
     sendTwilio({ event: "clear", streamSid });
-    hostChunks.length = 0;
+    resetPlayback();
     lastAssistant = "";
     responseStart = null;
   };
@@ -254,7 +256,8 @@ async function attachOpenAI(twilio: WebSocket) {
         responseStart = latestMedia;
         lastAssistant = event.item_id;
       }
-      hostChunks.push(Buffer.from(event.delta, "base64"));
+      const speech = Buffer.from(event.delta, "base64");
+      sendAudio(speech, speech.length);
     }
     if (event.type === "error") console.error("[call] openai_error", event);
   });

@@ -36,15 +36,15 @@ export function loadRoomLoop() {
   return readFileSync(join(process.cwd(), "assets", "restaurant.ulaw"));
 }
 
-export function mixRoomFrame(host: Buffer, room: Buffer, roomAt: number) {
-  const out = Buffer.alloc(ROOM_FRAME);
-  for (let i = 0; i < ROOM_FRAME; i += 1) {
-    const speech = ulawToLinear(host[i] ?? 0x7f);
+export function mixRoom(host: Buffer | null, length: number, room: Buffer, roomAt: number) {
+  const out = Buffer.alloc(length);
+  for (let i = 0; i < length; i += 1) {
+    const speech = host ? ulawToLinear(host[i]) : 0;
     const bed = ulawToLinear(room[(roomAt + i) % room.length]) * ROOM_GAIN;
     let sample = speech + bed;
     if (sample > 32767) sample = 32767;
     if (sample < -32768) sample = -32768;
     out[i] = linearToUlaw(sample);
   }
-  return { frame: out, next: (roomAt + ROOM_FRAME) % room.length };
+  return { audio: out, next: (roomAt + length) % room.length };
 }

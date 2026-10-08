@@ -5,17 +5,22 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "voice": "npx tsx scripts/twilio-galbi.ts",
+    "voice:deploy": "bash scripts/deploy-voice.sh",
     "generate:redirect": "node scripts/generate-redirect.mjs"
   },
   "dependencies": {
     "next": "^15.5.3",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.18.1",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.2"
   }
 }

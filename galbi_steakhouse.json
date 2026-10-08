@@ -1,0 +1,81 @@
+{
+  "_doc": "Source for the /demo host only. Each call reads this file into the voice prompt, so keep values short and exact. A menu item is used only when name is filled in. A deal is used only when details is filled in. Empty strings are skipped. The host will not invent dishes, prices, or deals. Hours use 24-hour HH:MM or the word closed. Day names are lowercase. Wait times, wait-list size, and whether the first requested reservation time is free are rolled per call in code, not here.",
+  "name": "Galbi Steakhouse",
+  "address": "120 Steakhouse Street, Steakville, CA",
+  "phone": "122-555-1234",
+  "parking": "Parking is free.",
+  "preorder": "Pre-order is not possible.",
+  "togo": "To-go orders are taken on this call. Collect a name and the items first. Then give the price and a pickup time. Pickup is 15 minutes from now only while we are open. If we are closed, pickup is the next opening time. Never give a pickup while we are closed.",
+  "timezone": "America/Los_Angeles",
+  "greeting": "Thanks for calling Galbi Steakhouse. How can I help?",
+  "off_topic_line": "Sorry, I can't help with that. I'm happy to help with anything about Galbi Steakhouse, though.",
+  "hours": {
+    "monday": "11:30-15:00 lunch, 15:00-21:30 dinner",
+    "tuesday": "11:30-15:00 lunch, 15:00-21:30 dinner",
+    "wednesday": "11:30-15:00 lunch, 15:00-21:30 dinner",
+    "thursday": "11:30-15:00 lunch, 15:00-21:30 dinner",
+    "friday": "11:30-15:00 lunch, 15:00-22:30 dinner",
+    "saturday": "11:30-15:00 lunch, 15:00-22:30 dinner",
+    "sunday": "12:00-15:00 lunch, 15:00-21:00 dinner"
+  },
+  "reservation": {
+    "max_party_size": 8,
+    "over_max_party": "We can book parties up to 8 on this line. For a larger group, I can text you a short form.",
+    "collect_name": true,
+    "notes": ""
+  },
+  "deals": [
+    {
+      "name": "Lunch",
+      "days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+      "start": "11:30",
+      "end": "15:00",
+      "details": "50% off all appetizers, buy 1 get 1 free on all non-alcoholic beverages"
+    },
+    {
+      "name": "Happy hour",
+      "days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+      "start": "15:00",
+      "end": "17:00",
+      "details": "free refill on beer and soju"
+    }
+  ],
+  "menu": [
+    {
+      "section": "Appetizers",
+      "items": [
+        { "name": "Kimchi Pancake", "price": "$10.99", "description": "Crispy pancake filled with kimchi and cheese" },
+        { "name": "Mandu", "price": "$8.99", "description": "Steamed dumplings filled with pork and vegetables" },
+        { "name": "Tteokbokki", "price": "$12.99", "description": "Sticky rice cakes in a spicy sauce" },
+        { "name": "Corn Cheese", "price": "$14.99", "description": "Grilled corn with cheese" }
+      ]
+    },
+    {
+      "section": "Al a carte Entrees",
+      "items": [
+        { "name": "Galbi", "price": "$19.99", "description": "Grilled marinated beef" },
+        { "name": "Samgyeopsal", "price": "$12.99", "description": "Raw pork belly" },
+        { "name": "Bibimbap", "price": "$14.99", "description": "Mixed rice bowl" },
+        { "name": "Kimchi Jjigae", "price": "$16.99", "description": "Korean spicy cabbage soup" },
+        { "name": "Bulgogi", "price": "$10.99", "description": "Grilled marinated beef" },
+        { "name": "Soondubu", "price": "$10.99", "description": "Soft tofu soup" },
+        { "name": "Nangmyeon", "price": "$10.99", "description": "Korean noodles" }
+      ]
+    },
+    {
+      "section": "Combination Entrees",
+      "items": [
+        { "name": "Combination 1", "price": "$59.99", "description": "Corn cheese + Galbi (2 servings) + Samgyeopsal (2 servings) + choice of soup" },
+        { "name": "Combination 2", "price": "$49.99", "description": "Corn cheese + Galbi (2 servings) + Bulgogi (2 servings) + choice of soup" },
+        { "name": "Combination 3", "price": "$99.99", "description": "Corn cheese + Galbi (2 servings) + Samgyeopsal (2 servings) + Bulgogi (2 servings) + choice of soup" }
+      ]
+    },
+    {
+      "section": "Drinks",
+      "items": [
+        { "name": "Soju", "price": "$5.99", "description": "Korean rice wine" },
+        { "name": "Beer", "price": "$5.99", "description": "Korean beer" }
+      ]
+    }
+  ]
+}

@@ -164,6 +164,14 @@ export function localNow(timeZone: string, at = Date.now()) {
   };
 }
 
+export function zonedIso(timeZone: string, key: string, minute: number) {
+  const [year, month, day] = key.split("-").map(Number);
+  const guess = Date.UTC(year, month - 1, day, Math.floor(minute / 60), minute % 60);
+  const seen = localNow(timeZone, guess);
+  const seenAt = Date.UTC(seen.year, seen.month - 1, seen.day, Math.floor(seen.minute / 60), seen.minute % 60);
+  return new Date(guess - (seenAt - guess)).toISOString();
+}
+
 export function dayAt(base: { year: number; month: number; day: number }, offset: number): Day {
   const at = new Date(Date.UTC(base.year, base.month - 1, base.day + offset));
   const weekday = WEEKDAYS[at.getUTCDay()];

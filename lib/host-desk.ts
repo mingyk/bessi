@@ -10,9 +10,12 @@ import {
   spokenClock,
   text,
   timeZoneOf,
+  zonedIso,
   type Day,
   type GalbiDoc,
 } from "./galbi-doc";
+import { ConnectorError, type Connectors } from "./connectors/types";
+import { sendSms } from "./sms";
 
 const PREP_MINUTES = 15;
 const LAST_SEAT_MINUTES = 30;
@@ -604,6 +607,7 @@ export const DESK_TOOLS = [
       properties: {
         day: { type: "string" },
         time: { type: "string", description: "A clock time or a meal, like lunch or dinner." },
+        party: { type: "integer", description: "Party size, if they said it." },
       },
     },
   },
@@ -689,14 +693,35 @@ export const DESK_TOOLS = [
   },
 ] as const;
 
-export function runDeskTool(
+export type DeskOptions = {
+  at?: number;
+  connectors?: Connectors;
+  caller?: string | null;
+};
+
+function unreachable(err: unknown) {
+  const detail = err instanceof ConnectorError ? err.message : err instanceof Error ? err.name : "error";
+  console.error("[desk] connector failed", detail);
+  return { result: "system_unreachable" };
+}
+
+function pickupSlot(desk: Desk, args: Record<string, unknown>) {
+  if (!text(args.time)) return earliestPickup(desk);
+  const place = desk.resolve(args.day, args.time);
+  return "problem" in place ? null : { day: place.day, minute: place.minute };
+}
+
+export async function runDeskTool(
   doc: GalbiDoc,
   state: DeskState,
   name: string,
   rawArgs: unknown,
-  at = Date.now(),
+  options: DeskOptions = {},
 ) {
-  const desk = new Desk(doc, at);
+  const desk = new Desk(doc, options.at ?? Date.now());
+  const orders = options.connectors?.orders ?? null;
+  const waitlist = options.connectors?.waitlist ?? null;
+  const caller = options.caller ?? null;
   const next: DeskState = JSON.parse(JSON.stringify(state)) as DeskState;
   let args: Record<string, unknown> = {};
   if (typeof rawArgs === "string") {
@@ -724,9 +749,25 @@ export function runDeskTool(
         next.booking = null;
       }
       break;
-    case "check_wait":
+    case "check_wait": {
       output = waitAnswer(desk, next, args);
+      if (output.result === "wait_now" && waitlist) {
+        try {
+          const live = await waitlist.status(partyOf(args.party));
+          output = live.open
+            ? {
+                result: "wait_now",
+                minutes: live.minutes,
+                parties_ahead: live.parties,
+                on_wait_list: next.waitlist ? next.waitlist.name : null,
+              }
+            : { result: "wait_list_closed", reason: live.reason };
+        } catch (err) {
+          output = unreachable(err);
+        }
+      }
       break;
+    }
     case "join_wait_list": {
       const party = partyOf(args.party);
       const guest = text(args.name);
@@ -737,6 +778,21 @@ export function runDeskTool(
         output = { result: party ? "need_name" : "need_party_size" };
       } else if (party > desk.maxParty) {
         output = { result: "party_too_large", max_party: desk.maxParty };
+      } else if (waitlist) {
+        try {
+          const joined = await waitlist.join({ name: guest, party, phone: caller });
+          next.waitlist = { name: guest, party };
+          output = {
+            result: "added",
+            name: guest,
+            party,
+            position: joined.position,
+            minutes: joined.minutes,
+            text_updates: Boolean(caller),
+          };
+        } catch (err) {
+          output = unreachable(err);
+        }
       } else {
         next.waitlist = { name: guest, party };
         output = { result: "added", name: guest, party, parties_ahead: next.wait.parties, minutes: next.wait.minutes };
@@ -763,7 +819,43 @@ export function runDeskTool(
       else if (priced.unknown.length) output = { result: "not_on_menu", items: priced.unknown };
       else if (!priced.lines.length) output = { result: "need_items" };
       else if (!pickup.ok) output = { result: "pickup_not_possible", ...pickup };
-      else {
+      else if (orders) {
+        const slot = pickupSlot(desk, args);
+        try {
+          if (!slot) throw new Error("no_pickup_slot");
+          const placed = await orders.place({
+            key: `bessi-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            guest,
+            phone: caller,
+            lines: priced.lines.map((line) => {
+              const item = matchItem(doc, line.item)!;
+              return { name: item.name, quantity: line.quantity, unitCents: Math.round(item.price * 100) };
+            }),
+            pickupAt: zonedIso(timeZoneOf(doc), slot.day.key, slot.minute),
+            pickupSpoken: String(pickup.pickup),
+          });
+          let payLinkTexted = false;
+          if (placed.payLink && caller) {
+            payLinkTexted = await sendSms(
+              caller,
+              `${text(doc.name) || "Your order"}: pay here to send your order to the kitchen ${placed.payLink}`,
+            ).catch(() => false);
+          }
+          const total = placed.totalCents != null ? money(placed.totalCents / 100) : money(priced.total);
+          next.order = { name: guest, total, pickup: String(pickup.pickup) };
+          output = {
+            result: placed.payLink ? (payLinkTexted ? "placed_pay_link_texted" : "pay_link_not_sent") : "placed",
+            name: guest,
+            items: priced.lines,
+            total,
+            total_includes_tax: placed.totalCents != null,
+            pay_at_pickup: !placed.payLink,
+            pickup: pickup.pickup,
+          };
+        } catch (err) {
+          output = unreachable(err);
+        }
+      } else {
         next.order = { name: guest, total: money(priced.total), pickup: String(pickup.pickup) };
         output = {
           result: "placed",

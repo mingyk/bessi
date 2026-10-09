@@ -6,11 +6,19 @@ import { WebSocket, WebSocketServer } from "ws";
 import { MODEL, VOICE } from "../lib/constants";
 import { buildGalbiCall } from "../lib/galbi";
 import { loadDoc } from "../lib/galbi-doc";
+import { connectorsFromEnv } from "../lib/connectors";
 import { runDeskTool } from "../lib/host-desk";
 import { getOpenAIKey } from "../lib/openai-key";
 import { loadRoomLoop, mixRoom, ROOM_FRAME } from "../lib/room-mix";
 
 const ROOM_LEAD_MS = 80;
+const GREET_DELAY_MS = 1200;
+const VAD_THRESHOLD = 0.7;
+const VAD_SILENCE_MS = 500;
+const SILENCE_HOLD_MS = 3000;
+const HOLD_MAX_MS = 6000;
+const HOLD_LINE =
+  "You're still working on the caller's last request and have gone quiet for a few seconds. In the caller's language, say only one short line that you need a moment, as if you're still checking. Don't answer, ask anything, or mention any details.";
 
 loadEnv();
 
@@ -21,7 +29,7 @@ const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
 type TwilioEvent = {
   event?: string;
   streamSid?: string;
-  start?: { streamSid?: string };
+  start?: { streamSid?: string; customParameters?: Record<string, string> };
   media?: { payload?: string; timestamp?: string };
 };
 
@@ -75,11 +83,15 @@ function publicUrl(request: IncomingMessage, path: string) {
   return `${proto}://${host}${path}`;
 }
 
-function twiml(streamUrl: string) {
+function twiml(streamUrl: string, caller: string) {
+  const from = /^\+[1-9]\d{6,14}$/.test(caller)
+    ? `\n      <Parameter name="caller" value="${caller}" />`
+    : "";
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="${streamUrl}" />
+    <Stream url="${streamUrl}">${from}
+    </Stream>
   </Connect>
 </Response>`;
 }
@@ -105,7 +117,7 @@ async function handleVoice(request: IncomingMessage, response: ServerResponse) {
     return;
   }
   const stream = publicUrl(request, "/media").replace(/^http/, "ws");
-  sendXml(response, twiml(stream));
+  sendXml(response, twiml(stream, params.From || ""));
 }
 
 async function attachOpenAI(twilio: WebSocket) {
@@ -117,6 +129,9 @@ async function attachOpenAI(twilio: WebSocket) {
   const { instructions, greeting, tools, desk: firstDesk } = buildGalbiCall();
   const doc = loadDoc();
   let desk = firstDesk;
+  let caller: string | null = null;
+  let toolQueue = Promise.resolve();
+  const connectors = connectorsFromEnv();
   const openai = new WebSocket(
     `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(MODEL)}`,
     { headers: { Authorization: `Bearer ${apiKey}` } },
@@ -127,6 +142,19 @@ async function attachOpenAI(twilio: WebSocket) {
   let responseStart: number | null = null;
   let lastAssistant = "";
   let greeted = false;
+  let greetTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  let sessionReady = false;
+  let greetLock = true;
+  let guestTalking = false;
+  let guestSpokeInLock = false;
+  let waitTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  let heldThisTurn = false;
+  let holdActive = false;
+  let holdCurrent = "";
+  let holdSafety: ReturnType<typeof setTimeout> | 0 = 0;
+  const holdIds = new Set<string>();
+  let queued: { item: string; audio: Buffer }[] = [];
+  let toolsPending = 0;
   const room = loadRoomLoop();
   let roomAt = 0;
   let pump: ReturnType<typeof setInterval> | 0 = 0;
@@ -177,6 +205,26 @@ async function attachOpenAI(twilio: WebSocket) {
     if (twilio.readyState === WebSocket.OPEN) twilio.send(JSON.stringify(event));
   };
 
+  const audioInput = () => ({
+    format: { type: "audio/pcmu" },
+    noise_reduction: { type: "near_field" },
+    turn_detection: {
+      type: "server_vad",
+      threshold: VAD_THRESHOLD,
+      prefix_padding_ms: 300,
+      silence_duration_ms: VAD_SILENCE_MS,
+      create_response: !greetLock && toolsPending === 0,
+      interrupt_response: !greetLock,
+    },
+  });
+
+  const applyTurns = () => {
+    sendOpenAI({
+      type: "session.update",
+      session: { type: "realtime", audio: { input: audioInput() } },
+    });
+  };
+
   const startSession = () => {
     sendOpenAI({
       type: "session.update",
@@ -188,17 +236,7 @@ async function attachOpenAI(twilio: WebSocket) {
         tools,
         tool_choice: "auto",
         audio: {
-          input: {
-            format: { type: "audio/pcmu" },
-            turn_detection: {
-              type: "server_vad",
-              threshold: 0.6,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 500,
-              create_response: true,
-              interrupt_response: true,
-            },
-          },
+          input: audioInput(),
           output: {
             format: { type: "audio/pcmu" },
             voice: VOICE,
@@ -206,6 +244,63 @@ async function attachOpenAI(twilio: WebSocket) {
         },
       },
     });
+  };
+
+  const playbackEnd = () => (playStart ? playStart + sentMs : Date.now());
+
+  const unlockGreeting = () => {
+    if (!greetLock) return;
+    greetLock = false;
+    applyTurns();
+    if (guestSpokeInLock && !guestTalking) sendOpenAI({ type: "response.create" });
+    console.log("[call] greeting_done");
+  };
+
+  const clearWait = () => {
+    if (waitTimer) clearTimeout(waitTimer);
+    waitTimer = 0;
+  };
+
+  const armWait = (delay: number) => {
+    if (waitTimer || heldThisTurn || greetLock) return;
+    waitTimer = setTimeout(() => {
+      waitTimer = 0;
+      if (heldThisTurn || holdActive || guestTalking) return;
+      heldThisTurn = true;
+      holdActive = true;
+      holdCurrent = "";
+      holdSafety = setTimeout(releaseHold, HOLD_MAX_MS);
+      sendOpenAI({
+        type: "response.create",
+        response: {
+          conversation: "none",
+          metadata: { purpose: "hold" },
+          output_modalities: ["audio"],
+          instructions: HOLD_LINE,
+          tool_choice: "none",
+          max_output_tokens: 80,
+        },
+      });
+      console.log("[call] hold");
+    }, Math.max(0, delay));
+  };
+
+  const sendHost = (item: string, audio: Buffer) => {
+    if (item && item !== lastAssistant) {
+      responseStart = latestMedia + Math.max(0, aheadMs());
+      lastAssistant = item;
+    }
+    sendAudio(audio, audio.length);
+  };
+
+  const releaseHold = () => {
+    if (holdSafety) clearTimeout(holdSafety);
+    holdSafety = 0;
+    holdActive = false;
+    holdCurrent = "";
+    const rows = queued;
+    queued = [];
+    for (const row of rows) sendHost(row.item, row.audio);
   };
 
   const greet = () => {
@@ -224,13 +319,28 @@ async function attachOpenAI(twilio: WebSocket) {
         ],
       },
     });
-    sendOpenAI({ type: "response.create" });
+    sendOpenAI({ type: "response.create", response: { metadata: { purpose: "greeting" } } });
+    setTimeout(unlockGreeting, 15000);
     console.log("[call] phone_greeting");
   };
 
+  const scheduleGreeting = () => {
+    if (greeted || greetTimer || !sessionReady || !streamSid) return;
+    greetTimer = setTimeout(greet, GREET_DELAY_MS);
+  };
+
   const barge = () => {
-    if (!lastAssistant) return;
-    if (responseStart != null) {
+    if (holdActive && holdCurrent) sendOpenAI({ type: "response.cancel", response_id: holdCurrent });
+    for (const item of new Set(queued.map((row) => row.item))) {
+      if (item === lastAssistant) continue;
+      sendOpenAI({ type: "conversation.item.truncate", item_id: item, content_index: 0, audio_end_ms: 0 });
+    }
+    queued = [];
+    if (holdSafety) clearTimeout(holdSafety);
+    holdSafety = 0;
+    holdActive = false;
+    holdCurrent = "";
+    if (lastAssistant && responseStart != null) {
       sendOpenAI({
         type: "conversation.item.truncate",
         item_id: lastAssistant,
@@ -250,48 +360,115 @@ async function attachOpenAI(twilio: WebSocket) {
       type?: string;
       delta?: string;
       item_id?: string;
+      response_id?: string;
       response?: {
+        id?: string;
         status?: string;
-        output?: { type?: string; call_id?: string; name?: string; arguments?: string }[];
+        metadata?: { purpose?: string } | null;
+        output?: { id?: string; type?: string; call_id?: string; name?: string; arguments?: string }[];
       };
     };
-    if (event.type === "session.updated") greet();
-    if (event.type === "input_audio_buffer.speech_started") barge();
+    const purpose = event.response?.metadata?.purpose;
+    if (event.type === "session.updated") {
+      sessionReady = true;
+      scheduleGreeting();
+    }
+    if (event.type === "input_audio_buffer.speech_started") {
+      guestTalking = true;
+      if (greetLock) guestSpokeInLock = true;
+      else {
+        clearWait();
+        barge();
+      }
+    }
+    if (event.type === "input_audio_buffer.speech_stopped") {
+      guestTalking = false;
+      if (!greetLock) {
+        heldThisTurn = false;
+        clearWait();
+        armWait(toolsPending ? 0 : SILENCE_HOLD_MS - VAD_SILENCE_MS);
+      }
+    }
+    if (event.type === "response.created" && !purpose && toolsPending && event.response?.id) {
+      sendOpenAI({ type: "response.cancel", response_id: event.response.id });
+    }
+    if (event.type === "response.created" && purpose === "hold" && event.response?.id) {
+      holdIds.add(event.response.id);
+      if (holdActive && !holdCurrent) holdCurrent = event.response.id;
+      else sendOpenAI({ type: "response.cancel", response_id: event.response.id });
+    }
     if (
       (event.type === "response.output_audio.delta" ||
         event.type === "response.audio.delta") &&
       event.delta
     ) {
-      if (event.item_id && event.item_id !== lastAssistant) {
-        responseStart = latestMedia;
-        lastAssistant = event.item_id;
-      }
       const speech = Buffer.from(event.delta, "base64");
-      sendAudio(speech, speech.length);
+      if (event.response_id && holdIds.has(event.response_id)) {
+        if (holdActive && event.response_id === holdCurrent) sendAudio(speech, speech.length);
+      } else {
+        clearWait();
+        if (holdActive) queued.push({ item: event.item_id || "", audio: speech });
+        else sendHost(event.item_id || "", speech);
+      }
+    }
+    if (event.type === "response.done" && purpose === "hold") {
+      if (event.response?.id === holdCurrent) releaseHold();
+      return;
+    }
+    if (event.type === "response.done" && purpose === "greeting") {
+      setTimeout(unlockGreeting, Math.max(0, playbackEnd() - Date.now()));
     }
     if (event.type === "response.done" && event.response?.status === "completed") {
       const calls = (event.response.output ?? []).filter(
         (item) => item.type === "function_call" && item.call_id && item.name,
       );
-      for (const call of calls) {
-        const result = runDeskTool(doc, desk, call.name!, call.arguments ?? "{}");
-        desk = result.state;
-        console.log("[call] tool", JSON.stringify({ name: call.name, args: call.arguments, output: result.output }));
-        sendOpenAI({
-          type: "conversation.item.create",
-          item: {
-            type: "function_call_output",
-            call_id: call.call_id,
-            output: JSON.stringify(result.output),
-          },
-        });
+      if (calls.length) {
+        toolsPending += 1;
+        applyTurns();
+        armWait(playbackEnd() - Date.now() + SILENCE_HOLD_MS);
+        toolQueue = toolQueue
+          .then(async () => {
+            for (const call of calls) {
+              let output: unknown;
+              try {
+                const result = await runDeskTool(doc, desk, call.name!, call.arguments ?? "{}", {
+                  connectors,
+                  caller,
+                });
+                desk = result.state;
+                output = result.output;
+              } catch (err) {
+                console.error("[call] tool_error", err instanceof Error ? err.message : err);
+                output = { ok: false, reason: "lookup_failed" };
+              }
+              console.log("[call] tool", JSON.stringify({ name: call.name, args: call.arguments, output }));
+              sendOpenAI({
+                type: "conversation.item.create",
+                ...(call.id ? { previous_item_id: call.id } : {}),
+                item: {
+                  type: "function_call_output",
+                  call_id: call.call_id,
+                  output: JSON.stringify(output),
+                },
+              });
+            }
+          })
+          .catch((err) => console.error("[call] tool_error", err instanceof Error ? err.message : err))
+          .finally(() => {
+            toolsPending -= 1;
+            if (toolsPending) return;
+            applyTurns();
+            if (!guestTalking) sendOpenAI({ type: "response.create" });
+          });
       }
-      if (calls.length) sendOpenAI({ type: "response.create" });
     }
     if (event.type === "error") console.error("[call] openai_error", event);
   });
   openai.on("close", () => {
     stopPump();
+    clearWait();
+    if (greetTimer) clearTimeout(greetTimer);
+    if (holdSafety) clearTimeout(holdSafety);
     twilio.close();
   });
   openai.on("error", (err) => {
@@ -303,8 +480,10 @@ async function attachOpenAI(twilio: WebSocket) {
     const data = JSON.parse(String(raw)) as TwilioEvent;
     if (data.event === "start") {
       streamSid = data.start?.streamSid || data.streamSid || "";
+      caller = data.start?.customParameters?.caller || null;
       console.log("[call] phone_stream", streamSid);
       startPump();
+      scheduleGreeting();
     }
     if (data.event === "media" && data.media?.payload) {
       latestMedia = Number(data.media.timestamp || latestMedia);

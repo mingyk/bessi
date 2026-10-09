@@ -7,6 +7,7 @@
     "start": "next start",
     "voice": "npx tsx scripts/twilio-galbi.ts",
     "voice:deploy": "bash scripts/deploy-voice.sh",
+    "connectors": "npx tsx scripts/check-connectors.ts",
     "generate:redirect": "node scripts/generate-redirect.mjs"
   },
   "dependencies": {
